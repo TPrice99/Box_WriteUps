@@ -35,13 +35,17 @@ Service Info: OS: Linux; CPE: cpe:/o:linux:linux_kernel
 # Foothold
 ## Ports
 #### 5601
+<pre>
 /app/kibana
     v6.5
     Follow link to get RCE:  https://systemweakness.com/this-kibana-vulnerability-can-give-you-rce-in-a-snap-kibana-cve-2019-7609-7de49112139e
+</pre>
 
 # PE
-- Spawn in as root. Find / -name proof.txt 2>/dev/null  ->  didn't find file
-- fdisk -l
+<pre>
+Spawn in as root. Find / -name proof.txt 2>/dev/null  ->  didn't find file
+fdisk -l
     mkdir /mnt/own
     mount /dev/sda1 /mnt/own
     cd /mnt/own/root  >  cat proof.txt
+</pre>
