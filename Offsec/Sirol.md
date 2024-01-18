@@ -1,6 +1,12 @@
-#Recon
+# Table of Contents
+- [Recon](#recon)
+    - [nmap](#nmap)
+- [Foothold](#foothold)
+- [PE](#pe)
 
-##nmap
+# Recon
+
+## nmap
 ```c
 PORT STATE SERVICE VERSION  
 22/tcp open ssh OpenSSH 7.4p1 Debian 10+deb9u7 (protocol 2.0)  
@@ -24,14 +30,14 @@ Network Distance: 4 hops
 Service Info: OS: Linux; CPE: cpe:/o:linux:linux_kernel
 ```
 
-#Foothold
-##Ports
-####5601
+# Foothold
+## Ports
+#### 5601
 /app/kibana
     v6.5
     Follow link to get RCE:  https://systemweakness.com/this-kibana-vulnerability-can-give-you-rce-in-a-snap-kibana-cve-2019-7609-7de49112139e
 
-#PE
+# PE
 - Spawn in as root. Find / -name proof.txt 2>/dev/null  ->  didn't find file
 - fdisk -l
     mkdir /mnt/own

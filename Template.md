@@ -1,10 +1,16 @@
-#Recon
+# Table of Contents
+- [Recon](#recon)
+    - [nmap](#nmap)
+- [Foothold](#foothold)
+- [PE](#pe)
 
-##nmap
+# Recon
+
+## nmap
 ```c
 ```
 
-#Foothold
-##Ports
+# Foothold
+## Ports
 
-#PE
+# PE
