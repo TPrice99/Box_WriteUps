@@ -2,6 +2,7 @@
 - [Recon](#recon)
     - [nmap](#nmap)
 - [Foothold](#foothold)
+    - [Ports](#ports)
 - [PE](#pe)
 
 # Recon
