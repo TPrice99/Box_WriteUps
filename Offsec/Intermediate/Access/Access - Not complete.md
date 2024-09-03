@@ -1,0 +1,124 @@
+### Enumeration
+```
+IP=192.168.169.187
+sudo nmap -sU $IP
+sudo nmap -p- -vv $IP
+sudo nmap -p53,80,88,135,139,445,389,445,464,593,636,3268,3269,5985,9389,49666,49668,49673,49674,49677,49706 -A $IP
+```
+#### Ports 
+- 135
+	- RPC
+- 139
+	- RPC
+- 445
+	- microsoft-ds
+- 53
+	- Simple DNS Plus
+- 80
+	- Apache httpd 2.4.48 ((Win64) OpenSSL/1.1.1k PHP/8.0.7)
+- 88
+	- Kerberos
+- 389
+	- Active Directory LDAP (Domain: access.offsec0.
+- 464
+	- kpasswd5
+- 593
+	- Microsoft Windows RPC over HTTP 1.0
+- 636
+	- tcpwrapped
+- 3268
+	- Active Directory LDAP (Domain: access.offsec0.
+- 3269
+	- tcpwrapped
+- 5985
+	- Microsoft HTTPAPI httpd 2.0 (SSDP/UPnP)
+- 9389
+	- .NET Message Framing
+- 49666
+	- RPC
+- 49668
+	- RPC
+- 49673
+	- RPC
+- 49674
+	- RPC
+- 49677
+	- RPC
+- 49706
+	- RPC
+- UDP
+	- 53 domain
+	- 88 kerberos
+	- 123 ntp
+	- 389 ldap
+- OS: Windows
+### Foothold
+- 445
+	- smbclient -N -L //$IP
+		- access denied
+	- nmap --script smb-vuln* -p139,445 $IP
+		- nothing
+- 80
+	- default page
+		- ![[Pasted image 20240625144645.png]]
+		- contact page at bottom
+		- `Designed by BootstrapMade`
+	- Buy ticket
+		- ![[Pasted image 20240625145013.png]]
+		- maybe bypass by uploading stuff
+		- Upload webshell.php
+			- POST to /ticket.php
+			- ![[Pasted image 20240625150010.png]]
+			- Changed extension to .jpg
+				- successful
+				- found in /uploads
+				- ![[Pasted image 20240625150634.png]]
+			- Changed extension to .xxx
+				- Allowed the upload
+				- Disaplyed the php code
+			- `echo "AddType application/x-httpd-php .xxx" > .htaccess`
+			- Allowed us to uploaded false .htaccess file
+			- Now our webshell loads and we can run commands as access\svc_apache
+			- Used base64 reverse shell
+	- dirsearch -u http://$IP
+		- /assets
+		- /cgi-bing/printenv.pl
+			- Not found
+		- /uploads
+		- /forms
+			- /contact.php
+				- ![[Pasted image 20240625145603.png]]
+				- Maybe we can file upload into the contact form?
+### PE
+#### Windows
+- whoami /all
+	- `access\svc_apache
+	- Group
+		- service
+	- priv
+		- SeChangeNotifyPrivilege enabled
+		- SeCreateGlobalPrivilege enabled
+		- SeIncreaseWorkingSetPrivilege disabled
+- systeminfo
+	- Microsoft Windows Server 2019 Standard
+	- 10.0.17763 N/A Build 17763
+	- x64
+- net user
+	- svc_apache
+	- svc_mssql
+	- krbtgt
+	- administrator
+- history
+	- nothing
+	- (Get-PSReadLineOption).HistorySavePath
+		- `type C:\Users\svc_apache\AppData\Roaming\Microsoft\Windows\PowerShell\PSReadLine\ConsoleHost_history.txt`
+			- nothing
+- Unquoted
+	- cmd
+		- wmic service get name,pathname | findstr /i /v "C:\Windows\\" | findstr /i /v """
+	- PS1
+		- Get-CimInstance -ClassName win32_service | Select Name,State,PathName
+	- icacls Filepath before .exe
+		- Looking for W or F
+- 
+### Lessons Learned

